@@ -1,3 +1,5 @@
+# fetchers/coupang.py
+
 import os
 import time
 import hmac
@@ -5,14 +7,12 @@ import hashlib
 import aiohttp
 from datetime import datetime, timedelta
 
-# === 반드시 함수 바깥! ===
 ACCESS = os.getenv("COUPANG_ACCESS_KEY")
 SECRET = os.getenv("COUPANG_SECRET_KEY")
 VENDOR = os.getenv("COUPANG_VENDOR_ID")
 BASE   = "https://api-gateway.coupang.com"
 
 def _hdr(method: str, path: str, query: str = "") -> dict:
-    """v4 API용 CEA 인증 헤더 생성"""
     ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
     sts = f"{ts}{method}{path}{query}"
     sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
@@ -28,22 +28,24 @@ def _hdr(method: str, path: str, query: str = "") -> dict:
         "Content-Type": "application/json;charset=UTF-8"
     }
 
-async def fetch_orders() -> list:
-    """최근 7일치 결제완료(ACCEPT) 주문 조회 및 평탄화"""
+async def fetch_orders(days: int = 7) -> list:
+    """최근 days(기본 7일) 주문을 조회. 주문 없으면 403 무시."""
+    # 최근 7일 범위로 조회
     now = datetime.utcnow()
-    seven_days_ago = now - timedelta(days=7)
-    start = seven_days_ago.strftime('%Y-%m-%dT00:00:00')
+    start = (now - timedelta(days=days)).strftime('%Y-%m-%dT00:00:00')
     end   = now.strftime('%Y-%m-%dT23:59:59')
 
     path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
-    query = (
-        f"createdAtFrom={start}&createdAtTo={end}"
-        f"&status=ACCEPT&maxPerPage=50"
-    )
+    query = f"createdAtFrom={start}&createdAtTo={end}&status=ACCEPT&maxPerPage=50"
     url = f"{BASE}{path}?{query}"
+
+    print(f"[Coupang] request URL: {url}")
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, headers=_hdr("GET", path, query)) as resp:
+            if resp.status == 403:
+                print("[Coupang] 403 Forbidden: 주문 없음 or 권한 문제 → 빈 리스트 반환")
+                return []
             resp.raise_for_status()
             resp_json = await resp.json()
 
@@ -51,6 +53,7 @@ async def fetch_orders() -> list:
     for o in resp_json.get("data", []):
         receiver = o.get("receiver", {})
         items    = o.get("orderItems", [])
+
         if items:
             first = items[0]
             product_name = first.get("vendorItemName", "")
@@ -72,3 +75,4 @@ async def fetch_orders() -> list:
         })
 
     return results
+
