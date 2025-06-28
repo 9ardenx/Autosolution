@@ -57,8 +57,8 @@ async def fetch_orders(
 ) -> list:
     """
     조건형 상품 주문 상세 내역 조회 (GET)
-    - created_from: ISO 8601 "YYYY-MM-DDTHH:MM:SS.sss±TZ" 형식 (생략 시 24시간 전 KST)
-    - status: ["PAYED", "DELIVERING", ...] (문서에 명시된 코드 사용)
+    - created_from: ISO 8601 "YYYY-MM-DDTHH:MM:SS.sss±TZ" (생략 시 24시간 전 KST)
+    - status: ["PAYED", ...] 등 문서에 명시된 코드 사용
     """
     # 1) KST 기준 24시간 전부터 현재까지
     KST = timezone(timedelta(hours=9))
@@ -68,7 +68,7 @@ async def fetch_orders(
     if status is None:
         status = ["PAYED"]
 
-    # 2) aiohttp params 사용해 자동 인코딩 처리
+    # 2) 파라미터 설정 (to 생략하면 from부터 24시간 범위)
     params = {
         "from":                  created_from,
         "rangeType":             "PAYED_DATETIME",
@@ -91,6 +91,19 @@ async def fetch_orders(
             resp.raise_for_status()
             data = await resp.json()
 
-    # 5) data 배열 반환
-    return data.get("data", [])
+    # 5) 각 주문을빌더가 기대하는 평탄화된 형태로 리턴
+    results = []
+    for o in data.get("data", []):
+        # flatten productOrderDtos → take first item
+        item = (o.get("productOrderDtos") or [{}])[0]
+        results.append({
+            "name":      o.get("receiverName", ""),
+            "contact":   o.get("receiverPhone", ""),
+            "address":   f"{o.get('receiverBaseAddress','')} {o.get('receiverDetailAddress','')}".strip(),
+            "product":   item.get("vendorItemName", ""),
+            "box_count": item.get("orderCount", 1),
+            "msg":        item.get("parcelPrintMessage", o.get("orderMemo", "")),
+            "order_id":  str(o.get("orderId", ""))
+        })
 
+    return results
