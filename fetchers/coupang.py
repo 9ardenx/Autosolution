@@ -1,10 +1,6 @@
 # fetchers/coupang.py
 
-import os
-import time
-import hmac
-import hashlib
-import aiohttp
+import os, time, hmac, hashlib, aiohttp
 from datetime import datetime
 
 ACCESS = os.getenv("COUPANG_ACCESS_KEY")
@@ -12,65 +8,49 @@ SECRET = os.getenv("COUPANG_SECRET_KEY")
 VENDOR = os.getenv("COUPANG_VENDOR_ID")
 BASE   = "https://api-gateway.coupang.com"
 
-def _hdr(method: str, path: str, query: str = "") -> dict:
+def _hdr(method, path, query=""):
     ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
-    sts = f"{ts}{method}{path}{query}"
-    sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
-    auth = (
-        f"CEA algorithm=HmacSHA256, "
-        f"access-key={ACCESS}, "
-        f"signed-date={ts}, "
-        f"signature={sig}"
-    )
+    sig = hmac.new(SECRET.encode(), (ts+method+path+query).encode(),
+                   hashlib.sha256).hexdigest()
+    auth = f"CEA algorithm=HmacSHA256, access-key={ACCESS}, signed-date={ts}, signature={sig}"
     return {
         "Authorization": auth,
         "X-Requested-By": VENDOR,
         "Content-Type": "application/json;charset=UTF-8"
     }
 
-async def fetch_orders() -> list:
+async def fetch_orders():
+    # 오늘 날짜(ISO yyyy-MM-dd)
     today = datetime.utcnow().strftime('%Y-%m-%d')
-    path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
-    query = f"createdAtFrom={today}&createdAtTo={today}&status=ACCEPT&maxPerPage=50"
-    url = f"{BASE}{path}?{query}"
+    path  = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
+    query = f"createdAtFrom={today}&createdAtTo={today}&status=ACCEPT&maxPerPage=100"
+    url   = f"{BASE}{path}?{query}"
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, headers=_hdr("GET", path, query)) as resp:
-            # 디버그 로그
-            text = await resp.text()
-            print(f"[Coupang] request URL: {url}")
-            print(f"[Coupang] status: {resp.status}")
-            print(f"[Coupang] body: {text}")
             resp.raise_for_status()
-            resp_json = await resp.json()
+            js = await resp.json()
 
-    raw_data = resp_json.get("data", {})
-    orders = raw_data.get("orderSheetDisplayResponses", []) if isinstance(raw_data, dict) else raw_data
-
-    results = []
-    for o in orders:
+    out = []
+    for o in js.get("data", []):
         receiver = o.get("receiver", {})
         items = o.get("orderItems", [])
 
+        # 옵션명 포함 상품명(문자열) 확보
         if items:
-            first = items[0]
-            product_name = first.get("vendorItemName", "")
-            box_count    = first.get("shippingCount", 0)
-            msg          = first.get("parcelPrintMessage", o.get("parcelPrintMessage", ""))
+            text = items[0].get("vendorItemName", "")
+            # 쿠팡 옵션명 뒤에 "다크..." 등 포함되도록 설정되어 있어야 함
         else:
-            product_name = ""
-            box_count    = 0
-            msg          = o.get("parcelPrintMessage", "")
+            text = ""
 
-        results.append({
+        out.append({
             "name":      receiver.get("name", ""),
             "contact":   receiver.get("receiverNumber", ""),
-            "address":   f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
-            "product":   product_name,
-            "box_count": box_count,
-            "msg":        msg,
-            "order_id":  str(o.get("orderId", ""))
+            "address":   f\"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
+            "product":   text,                    # 옵션명 문자열
+            "box_count": items[0].get("shippingCount", 0) if items else 0,
+            "msg":        items[0].get("parcelPrintMessage", o.get("parcelPrintMessage","")),
+            "order_id":   str(o.get("orderId",""))
         })
 
-    return results
-
+    return out
