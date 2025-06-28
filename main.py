@@ -13,36 +13,28 @@ from notifier.kakao        import send_file_link
 load_dotenv()
 
 async def run():
-    # SmartStore와 Coupang 주문을 병렬 조회
-    ss_data, cp_orders = await asyncio.gather(
+    # 1) 병렬 조회
+    ss_orders, cp_orders = await asyncio.gather(
         ss_fetch(),
         cp_fetch()
     )
 
-    # SmartStore 반환값이 dict이면 contents 키의 리스트를 사용
-    if isinstance(ss_data, dict):
-        ss_orders = ss_data.get("contents", [])
-    else:
-        ss_orders = ss_data
+    print("SmartStore count:", len(ss_orders))
+    print("Coupang count:",   len(cp_orders))
 
-    print("SmartStore orders count:", len(ss_orders))
-    print("Coupang orders count:",   len(cp_orders))
+    # 2) 합치기
+    all_orders = list(itertools.chain(ss_orders, cp_orders))
 
-    # 주문 리스트 합치기
-    combined_orders = list(itertools.chain(ss_orders, cp_orders))
-
-    # 방어막: 딕셔너리가 아닌 항목은 제거
-    clean_orders = [o for o in combined_orders if isinstance(o, dict)]
-
-    # 인보이스 생성 및 CSV 저장
-    invoices = build_invoices(clean_orders)
+    # 3) 빌드 및 CSV
+    invoices = []
+    for o in all_orders:
+        invoices.extend(build_invoices(o))
     csv_path = save_csv(invoices)
-    print(f"CSV saved to {csv_path}")
+    print("CSV saved to", csv_path)
 
-    # 카카오톡으로 링크 전송
+    # 4) 전송
     await send_file_link(csv_path)
 
 if __name__ == "__main__":
     asyncio.run(run())
-
 
