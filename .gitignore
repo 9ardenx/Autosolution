@@ -8,6 +8,7 @@ __pycache__/
 
 # 실행 결과물
 exports/
+# docs/exports/ <<== 이 부분 주석처리 또는 삭제!
 *.csv
 *.log
 
