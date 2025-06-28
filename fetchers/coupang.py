@@ -13,7 +13,6 @@ VENDOR = os.getenv("COUPANG_VENDOR_ID")
 BASE   = "https://api-gateway.coupang.com"
 
 def _hdr(method: str, path: str, query: str = "") -> dict:
-    """v4 API용 CEA 인증 헤더 생성"""
     ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
     sts = f"{ts}{method}{path}{query}"
     sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
@@ -30,7 +29,6 @@ def _hdr(method: str, path: str, query: str = "") -> dict:
     }
 
 async def fetch_orders() -> list:
-    """v4 API를 사용한 주문 조회 및 평탄화"""
     today = datetime.utcnow().strftime('%Y-%m-%d')
     path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
     query = f"createdAtFrom={today}&createdAtTo={today}&status=ACCEPT&maxPerPage=50"
@@ -46,7 +44,6 @@ async def fetch_orders() -> list:
             resp.raise_for_status()
             resp_json = await resp.json()
 
-    # 실제 데이터 구조에 맞춰 리스트 추출
     raw_data = resp_json.get("data", {})
     orders = raw_data.get("orderSheetDisplayResponses", []) if isinstance(raw_data, dict) else raw_data
 
