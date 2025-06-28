@@ -47,12 +47,12 @@ async def fetch_orders() -> list:
         receiver = o.get("receiver", {})
         items = o.get("orderItems", [])
 
-        # 최소 하나의 상품 항목 처리: 첫 번째 아이템만 사용
+        # 첫 번째 상품만 문자열로 처리
         if items:
-            item = items[0]
-            product_name = item.get("vendorItemName", "")
-            box_count    = item.get("shippingCount", 0)
-            msg          = item.get("parcelPrintMessage", o.get("parcelPrintMessage", ""))
+            first = items[0]
+            product_name = first.get("vendorItemName", "")
+            box_count    = first.get("shippingCount", 0)
+            msg          = first.get("parcelPrintMessage", o.get("parcelPrintMessage", ""))
         else:
             product_name = ""
             box_count    = 0
@@ -62,9 +62,9 @@ async def fetch_orders() -> list:
             "name":      receiver.get("name", ""),
             "contact":   receiver.get("receiverNumber", ""),
             "address":   f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
-            "product":   product_name,     # 문자열
-            "box_count": box_count,        # 숫자
-            "msg":        msg,             # 문자열
+            "product":   product_name,     # 항상 문자열
+            "box_count": box_count,
+            "msg":        msg,
             "order_id":  str(o.get("orderId", ""))
         })
 
