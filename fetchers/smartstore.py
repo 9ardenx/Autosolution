@@ -1,10 +1,8 @@
-# fetchers/smartstore.py
-
 import os
 import time
 import aiohttp
-import bcrypt
-import pybase64
+import bcrypt            # pip install bcrypt
+import pybase64          # pip install pybase64
 from datetime import datetime, timedelta, timezone
 
 CLIENT_ID     = os.getenv("NAVER_ACCESS_KEY")
@@ -19,6 +17,7 @@ async def _fetch_token() -> str:
     raw = f"{CLIENT_ID}_{ts}".encode()
     signed = bcrypt.hashpw(raw, CLIENT_SECRET.encode())
     sign_b64 = pybase64.standard_b64encode(signed).decode()
+
     data = {
         "client_id":          CLIENT_ID,
         "timestamp":          ts,
@@ -27,10 +26,12 @@ async def _fetch_token() -> str:
         "type":               "SELF"
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
     async with aiohttp.ClientSession() as sess:
         async with sess.post(TOKEN_URL, data=data, headers=headers) as resp:
             resp.raise_for_status()
             js = await resp.json()
+
     token      = js["access_token"]
     expires    = js.get("expires_in", 10800)
     _fetch_token._token      = token
@@ -42,29 +43,20 @@ async def _get_token() -> str:
         return await _fetch_token()
     return _fetch_token._token
 
-async def fetch_orders(
-    status: list = None,
-    page_size: int = 100,
-    page: int = 1
-) -> list:
+async def fetch_orders(days: int = 4) -> list:
     """
-    최근 4일(금~월) 결제완료 주문만 긁어옴
+    최근 n일간 결제완료(PAYED) 주문만 불러오기
     """
     KST = timezone(timedelta(hours=9))
     now_kst = datetime.now(KST)
-    from_dt = (now_kst - timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
-    created_from = from_dt.isoformat(timespec="milliseconds")
-    created_to   = now_kst.isoformat(timespec="milliseconds")
-    if status is None:
-        status = ["PAYED"]
+    created_from = (now_kst - timedelta(days=days)).isoformat(timespec="milliseconds")
 
     params = {
         "from":                  created_from,
-        "to":                    created_to,
         "rangeType":             "PAYED_DATETIME",
-        "productOrderStatuses":  ",".join(status),
-        "pageSize":              page_size,
-        "page":                  page
+        "productOrderStatuses":  "PAYED",
+        "pageSize":              100,
+        "page":                  1
     }
 
     token = await _get_token()
@@ -76,6 +68,9 @@ async def fetch_orders(
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(ORDER_LIST_URL, params=params, headers=headers) as resp:
+            if resp.status == 403:
+                print("[SmartStore] 403 Forbidden: 인증 실패(키/시크릿/고객ID 확인) or 권한 부족")
+                return []
             resp.raise_for_status()
             response_json = await resp.json()
 
@@ -88,7 +83,7 @@ async def fetch_orders(
             "address":   f"{o.get('receiverBaseAddress','')} {o.get('receiverDetailAddress','')}".strip(),
             "product":   o.get("vendorItemName", ""),
             "box_count": o.get("orderCount", 1),
-            "msg":        o.get("parcelPrintMessage", o.get("orderMemo", "")),
+            "msg":       o.get("parcelPrintMessage", o.get("orderMemo", "")),
             "order_id":  str(o.get("orderId", ""))
         })
 
