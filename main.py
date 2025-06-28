@@ -5,31 +5,25 @@ import itertools
 from dotenv import load_dotenv
 
 from fetchers.smartstore import fetch_orders as ss_fetch
-from fetchers.coupang import fetch_orders as cp_fetch
-from invoices.builder import build_invoices
+from fetchers.coupang    import fetch_orders as cp_fetch
+from invoices.builder     import build_invoices
 from exporter.csv_exporter import save_csv
-from notifier.kakao import send_file_link
+from notifier.kakao        import send_file_link
 
 load_dotenv()
 
 async def run():
-    # SmartStore와 Coupang 주문을 병렬 조회
     ss_orders, cp_orders = await asyncio.gather(
         ss_fetch(),
         cp_fetch()
     )
-
     print("SmartStore orders:", ss_orders)
-    print("Coupang orders:", cp_orders)
+    print("Coupang orders:",   cp_orders)
 
-    # 인보이스 생성
     invoices = build_invoices(itertools.chain(ss_orders, cp_orders))
-
-    # CSV로 저장
     csv_path = save_csv(invoices)
     print(f"CSV saved to {csv_path}")
 
-    # 카카오톡으로 링크 전송
     await send_file_link(csv_path)
 
 if __name__ == "__main__":
