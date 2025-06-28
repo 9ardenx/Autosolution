@@ -1,5 +1,15 @@
+import os
+import time
+import hmac
+import hashlib
+import aiohttp
 from datetime import datetime, timedelta
 
+# === 반드시 함수 바깥! ===
+ACCESS = os.getenv("COUPANG_ACCESS_KEY")
+SECRET = os.getenv("COUPANG_SECRET_KEY")
+VENDOR = os.getenv("COUPANG_VENDOR_ID")
+BASE   = "https://api-gateway.coupang.com"
 async def fetch_orders() -> list:
     """최근 7일치 결제완료(ACCEPT) 주문 조회 및 평탄화"""
     now = datetime.utcnow()
