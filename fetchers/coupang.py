@@ -1,5 +1,3 @@
-# fetchers/coupang.py
-
 import os
 import time
 import hmac
@@ -29,10 +27,11 @@ def _hdr(method: str, path: str, query: str = "") -> dict:
     }
 
 async def fetch_orders(days: int = 4) -> list:
-    """최근 days(기본 4일: 금~월) 주문을 조회. 주문 없으면 403 무시."""
-    # 최근 4일 범위로 조회 (UTC 기준)
+    """
+    최근 n일간 결제완료(ACCEPT) 주문만 불러오기
+    """
     now = datetime.utcnow()
-    start = (now - timedelta(days=3)).strftime('%Y-%m-%dT00:00:00')
+    start = (now - timedelta(days=days)).strftime('%Y-%m-%dT00:00:00')
     end   = now.strftime('%Y-%m-%dT23:59:59')
 
     path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
@@ -44,7 +43,7 @@ async def fetch_orders(days: int = 4) -> list:
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, headers=_hdr("GET", path, query)) as resp:
             if resp.status == 403:
-                print("[Coupang] 403 Forbidden: 주문 없음 or 권한 문제 → 빈 리스트 반환")
+                print("[Coupang] 403 Forbidden: 인증 실패 or 주문 없음 or 권한 문제 → 빈 리스트 반환")
                 return []
             resp.raise_for_status()
             resp_json = await resp.json()
@@ -75,3 +74,4 @@ async def fetch_orders(days: int = 4) -> list:
         })
 
     return results
+
