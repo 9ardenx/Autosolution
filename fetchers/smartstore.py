@@ -1,76 +1,88 @@
 # fetchers/smartstore.py
+import os
+import time
+import json
+import hashlib
+import hmac
+import aiohttp
+from datetime import datetime
 
-import os, time, json, hashlib, hmac, aiohttp
+# 환경변수 로드: .env 또는 Codespaces Secrets
+ACCESS_KEY    = os.getenv("NAVER_ACCESS_KEY")
+SECRET_KEY    = os.getenv("NAVER_SECRET_KEY")
+CUSTOMER_ID   = os.getenv("NAVER_CUSTOMER_ID")
+BASE_URL      = "https://api.commerce.naver.com"
 
-ACCESS_KEY     = os.getenv("NAVER_ACCESS_KEY")
-SECRET_KEY     = os.getenv("NAVER_SECRET_KEY")
-CUSTOMER_ID    = os.getenv("NAVER_CUSTOMER_ID")
-BASE_URL       = "https://api.commerce.naver.com"
 
-def _sig(method: str, path: str, ts: str, body: str = "") -> str:
+def _sig(method: str, path: str, ts: str, body_str: str = "") -> str:
     """
-    StringToSign 포맷: "{timestamp}.{method}.{path}.{body}"
-    Signature    : HMAC-SHA256(secretKey, StringToSign).hexdigest()
+    stringToSign 포맷: "{timestamp}.{method}.{path}.{body}"
+    HMAC-SHA256(hex)
     """
-    msg = f"{ts}.{method}.{path}.{body}"
-    print("▶ Naver StringToSign:", msg)           # 디버그 출력
+    msg = f"{ts}.{method}.{path}.{body_str}"
+    print(f"▶ Naver StringToSign: {msg}")
     sig = hmac.new(
         SECRET_KEY.encode(),
         msg.encode(),
         hashlib.sha256
     ).hexdigest()
-    print("▶ Naver Signature   :", sig)           # 디버그 출력
+    print(f"▶ Naver Signature   : {sig}")
     return sig
+
 
 def _hdr(method: str, path: str, body_obj=None) -> dict:
     """
-    매 호출마다 timestamp 새로 생성 → HMAC 생성 → 헤더 반환
+    네이버 커머스 API 인증 헤더 생성
     """
     ts = str(int(time.time() * 1000))
-    body_str = json.dumps(body_obj, separators=(",", ":")) if body_obj else ""
-    sig = _sig(method, path, ts, body_str)
-    return {
-        "X-API-KEY"      : ACCESS_KEY,
-        "X-Customer-Id"  : CUSTOMER_ID,
-        "X-Timestamp"    : ts,
-        "X-Signature"    : sig,
-        "Content-Type"   : "application/json",
+    body_str = json.dumps(body_obj, separators=(",",":")) if body_obj else ""
+    signature = _sig(method, path, ts, body_str)
+    headers = {
+        "X-API-KEY"    : ACCESS_KEY,
+        "X-Customer-Id": CUSTOMER_ID,
+        "X-Timestamp"  : ts,
+        "X-Signature"  : signature,
+        "Content-Type" : "application/json",
     }
+    print(f"▶ Naver Headers   : {headers}")
+    return headers
+
 
 async def fetch_orders():
     """
-    v1 주문 판매자 API 예시 (ON_PAYMENT 상태 조회)
+    ON_PAYMENT 상태(결제완료) 주문 조회
     """
-    from_date = "2024-01-01T00:00:00"
-    to_date   = "2099-12-31T23:59:59"
+    # 날짜 필터: 오늘~오늘
+    today = datetime.now().strftime('%Y-%m-%dT00:00:00')
+    to_day = datetime.now().strftime('%Y-%m-%dT23:59:59')
 
-    # v1 한 방 조회 엔드포인트
     path = "/external/v1/pay-order/seller/product-orders/query"
+    url  = f"{BASE_URL}{path}"
+
     body = {
-        "createdAtFrom": from_date,
-        "createdAtTo"  : to_date,
-        "status"       : ["ON_PAYMENT"],
+        "createdAtFrom": today,
+        "createdAtTo"  : to_day,
+        "status"       : ["ON_PAYMENT"]
     }
-    url = f"{BASE_URL}{path}"
 
     async with aiohttp.ClientSession() as sess:
         async with sess.post(url, json=body, headers=_hdr("POST", path, body)) as resp:
-            print("▶ HTTP STATUS:", resp.status)
+            print(f"▶ Naver HTTP Status: {resp.status} {resp.reason}")
             text = await resp.text()
-            print("▶ RESPONSE BODY:", text[:200], "…")  # 첫 200자만
+            print(f"▶ Naver Response   : {text[:200]}{'...' if len(text)>200 else ''}")
             resp.raise_for_status()
             data = await resp.json()
 
     orders = []
+    # productOrderDtos 리스트 순회
     for dto in data.get("productOrderDtos", []):
         orders.append({
-            "name"         : dto["receiverName"],
-            "contact"      : dto["receiverPhone"],
-            "address"      : dto["receiverAddr"].strip(),
-            "product"      : dto["productName"],
-            "box_count"    : dto["orderCount"],
-            "msg"          : dto.get("memo", ""),
-            "platform_id"  : str(dto["orderId"]),
+            "name": dto.get("receiverName"),
+            "contact": dto.get("receiverPhone"),
+            "address": dto.get("receiverAddr"),
+            "product": dto.get("productName"),
+            "box_count": dto.get("orderCount"),
+            "msg": dto.get("memo", ""),
+            "order_id": str(dto.get("orderId")),
         })
     return orders
-
