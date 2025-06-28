@@ -1,88 +1,108 @@
 # fetchers/smartstore.py
+
 import os
 import time
 import json
-import hashlib
-import hmac
+import bcrypt                # pip install bcrypt
+import pybase64             # pip install pybase64
 import aiohttp
-from datetime import datetime
+import asyncio
 
-# 환경변수 로드: .env 또는 Codespaces Secrets
-ACCESS_KEY    = os.getenv("NAVER_ACCESS_KEY")
-SECRET_KEY    = os.getenv("NAVER_SECRET_KEY")
-CUSTOMER_ID   = os.getenv("NAVER_CUSTOMER_ID")
-BASE_URL      = "https://api.commerce.naver.com"
+# 환경변수에서 읽어오기
+CLIENT_ID     = os.getenv("NAVER_ACCESS_KEY")
+CLIENT_SECRET = os.getenv("NAVER_SECRET_KEY")
+CUSTOMER_ID   = os.getenv("NAVER_CUSTOMER_ID")   # commerce API Center > My App > Customer ID
+TOKEN_URL     = "https://api.commerce.naver.com/external/v1/oauth2/token"
+ORDER_URL     = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/query"
 
+class SmartStoreClient:
+    def __init__(self):
+        self.client_id     = CLIENT_ID
+        self.client_secret = CLIENT_SECRET
+        self.customer_id   = CUSTOMER_ID
+        self._token        = None
+        self._expires_at   = 0  # UNIX timestamp
 
-def _sig(method: str, path: str, ts: str, body_str: str = "") -> str:
-    """
-    stringToSign 포맷: "{timestamp}.{method}.{path}.{body}"
-    HMAC-SHA256(hex)
-    """
-    msg = f"{ts}.{method}.{path}.{body_str}"
-    print(f"▶ Naver StringToSign: {msg}")
-    sig = hmac.new(
-        SECRET_KEY.encode(),
-        msg.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    print(f"▶ Naver Signature   : {sig}")
-    return sig
+    async def _fetch_token(self) -> str:
+        """토큰 발급/갱신 (Client Credentials Grant + 전자서명)"""
+        # 1) 타임스탬프 (밀리초) 생성 (API 서버와 5초 오차 허용)
+        timestamp = str(int((time.time() - 3) * 1000))
+        # 2) 전자서명 생성: bcrypt(client_id_timestamp, client_secret) → Base64
+        raw_pwd = f"{self.client_id}_{timestamp}".encode("utf-8")
+        signed = bcrypt.hashpw(raw_pwd, self.client_secret.encode("utf-8"))
+        client_secret_sign = pybase64.standard_b64encode(signed).decode()
 
+        # 3) 요청 파라미터 및 헤더
+        data = {
+            "client_id":            self.client_id,
+            "timestamp":            timestamp,
+            "client_secret_sign":   client_secret_sign,
+            "grant_type":           "client_credentials",
+            "type":                 "SELF"
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-def _hdr(method: str, path: str, body_obj=None) -> dict:
-    """
-    네이버 커머스 API 인증 헤더 생성
-    """
-    ts = str(int(time.time() * 1000))
-    body_str = json.dumps(body_obj, separators=(",",":")) if body_obj else ""
-    signature = _sig(method, path, ts, body_str)
-    headers = {
-        "X-API-KEY"    : ACCESS_KEY,
-        "X-Customer-Id": CUSTOMER_ID,
-        "X-Timestamp"  : ts,
-        "X-Signature"  : signature,
-        "Content-Type" : "application/json",
-    }
-    print(f"▶ Naver Headers   : {headers}")
-    return headers
+        # 4) 토큰 요청
+        async with aiohttp.ClientSession() as sess:
+            async with sess.post(TOKEN_URL, data=data, headers=headers) as resp:
+                resp.raise_for_status()
+                resp_json = await resp.json()
 
+        # 5) 토큰 저장 및 만료 시간 계산 (expires_in: 초)
+        token       = resp_json["access_token"]
+        expires_in  = resp_json.get("expires_in", 10800)
+        self._token      = token
+        self._expires_at = time.time() + expires_in - 60  # 마진 60초 전 갱신
 
-async def fetch_orders():
-    """
-    ON_PAYMENT 상태(결제완료) 주문 조회
-    """
-    # 날짜 필터: 오늘~오늘
-    today = datetime.now().strftime('%Y-%m-%dT00:00:00')
-    to_day = datetime.now().strftime('%Y-%m-%dT23:59:59')
+        return token
 
-    path = "/external/v1/pay-order/seller/product-orders/query"
-    url  = f"{BASE_URL}{path}"
+    async def get_token(self) -> str:
+        """유효한 토큰 반환 (필요 시 갱신)"""
+        if not self._token or time.time() >= self._expires_at:
+            return await self._fetch_token()
+        return self._token
 
-    body = {
-        "createdAtFrom": today,
-        "createdAtTo"  : to_day,
-        "status"       : ["ON_PAYMENT"]
-    }
+    async def fetch_orders(self,
+                           createdAtFrom: str = "2024-01-01T00:00:00",
+                           createdAtTo:   str = "2099-12-31T23:59:59",
+                           status:        list = ["ON_PAYMENT"]) -> list:
+        """
+        주문 목록 조회
+        - createdAtFrom/To: ISO 8601 (yyyy-MM-ddTHH:mm:ss)
+        - status: ON_PAYMENT, IN_DELIVERY, DELIVERED 등
+        """
+        token = await self.get_token()
 
-    async with aiohttp.ClientSession() as sess:
-        async with sess.post(url, json=body, headers=_hdr("POST", path, body)) as resp:
-            print(f"▶ Naver HTTP Status: {resp.status} {resp.reason}")
-            text = await resp.text()
-            print(f"▶ Naver Response   : {text[:200]}{'...' if len(text)>200 else ''}")
-            resp.raise_for_status()
-            data = await resp.json()
+        payload = {
+            "createdAtFrom": createdAtFrom,
+            "createdAtTo":   createdAtTo,
+            "status":        status
+        }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "X-Customer-Id": self.customer_id
+        }
 
-    orders = []
-    # productOrderDtos 리스트 순회
-    for dto in data.get("productOrderDtos", []):
-        orders.append({
-            "name": dto.get("receiverName"),
-            "contact": dto.get("receiverPhone"),
-            "address": dto.get("receiverAddr"),
-            "product": dto.get("productName"),
-            "box_count": dto.get("orderCount"),
-            "msg": dto.get("memo", ""),
-            "order_id": str(dto.get("orderId")),
-        })
-    return orders
+        async with aiohttp.ClientSession() as sess:
+            async with sess.post(ORDER_URL, json=payload, headers=headers) as resp:
+                resp.raise_for_status()
+                result = await resp.json()
+
+        # 필요에 따라 result["data"] 또는 result["productOrderDtos"] 구조에 맞춰 파싱
+        return result.get("data", [])
+
+# 전역 클라이언트 인스턴스
+smartstore_client = SmartStoreClient()
+
+# 예시: 단독 실행 시
+if __name__ == "__main__":
+    async def main():
+        orders = await smartstore_client.fetch_orders(
+            createdAtFrom="2025-06-28T00:00:00",
+            createdAtTo=  "2025-06-28T23:59:59",
+            status=["ON_PAYMENT"]
+        )
+        print(json.dumps(orders, indent=2, ensure_ascii=False))
+
+    asyncio.run(main())
