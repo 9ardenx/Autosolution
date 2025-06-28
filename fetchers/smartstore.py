@@ -3,8 +3,8 @@
 import os
 import time
 import aiohttp
-import bcrypt  # pip install bcrypt
-import pybase64  # pip install pybase64
+import bcrypt      # pip install bcrypt
+import pybase64    # pip install pybase64
 from datetime import datetime, timedelta, timezone
 
 # 환경변수
@@ -17,7 +17,6 @@ TOKEN_URL        = "https://api.commerce.naver.com/external/v1/oauth2/token"
 LAST_CHANGED_URL = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/last-changed-statuses"
 
 async def _fetch_token() -> str:
-    """OAuth2 Client Credentials Grant + 전자서명으로 토큰 발급"""
     ts = str(int((time.time() - 3) * 1000))
     raw = f"{CLIENT_ID}_{ts}".encode()
     signed = bcrypt.hashpw(raw, CLIENT_SECRET.encode())
@@ -44,7 +43,6 @@ async def _fetch_token() -> str:
     return token
 
 async def _get_token() -> str:
-    """캐시된 토큰 재사용, 없거나 만료 임박 시 재발급"""
     if not getattr(_fetch_token, "_token", None) or time.time() >= getattr(_fetch_token, "_expires_at", 0):
         return await _fetch_token()
     return _fetch_token._token
@@ -55,13 +53,6 @@ async def fetch_orders(
     limit_count:      int = 100,
     more_sequence:    str = None
 ) -> list:
-    """
-    '변경 상품 주문 내역 조회' (last-changed-statuses)
-    - last_changed_from: ISO8601 with ms +TZ (e.g. "2025-06-27T21:00:00.000+09:00"), defaults to 24h ago
-    - last_changed_type: one of PAY_WAITING,PAYED,DELIVERING,DELIVERED, etc.
-    - limit_count: up to 300
-    - more_sequence: for paging
-    """
     KST = timezone(timedelta(hours=9))
     now_kst = datetime.now(KST)
     if last_changed_from is None:
@@ -107,4 +98,3 @@ async def fetch_orders(
         })
 
     return results
-
