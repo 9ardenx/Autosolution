@@ -1,5 +1,5 @@
 # test_coupang.py
-import os, time, hmac, hashlib, base64, requests
+import os, time, hmac, hashlib, requests
 
 ACCESS = os.getenv("COUPANG_ACCESS_KEY")
 SECRET = os.getenv("COUPANG_SECRET_KEY")
@@ -11,26 +11,29 @@ path   = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
 query  = "status=ACCEPT&page=1&maxPerPage=1"
 url    = f"{BASE}{path}?{query}"
 
-# 1) 타임스탬프
-ts = str(int(time.time() * 1000))
+# 1) signed-date (UTC, yyMMddTHHmmssZ)
+ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
 
-# 2) StringToSign (한 문자열로 세 줄을 결합)
-string_to_sign = f"{method} {path}?{query}\n{ts}\n{ACCESS}"
-print("▶ StringToSign:", repr(string_to_sign))
+# 2) stringToSign = signed-date + method + path + query
+string_to_sign = f"{ts}{method}{path}{query}"
+print("▶ stringToSign:", string_to_sign)
 
-# 3) Signature (Base64)
-sig = base64.b64encode(
-    hmac.new(SECRET.encode(), string_to_sign.encode(), hashlib.sha256).digest()
-).decode()
-print("▶ Signature   :", sig)
+# 3) signature = HEX(HMAC-SHA256)
+sig = hmac.new(SECRET.encode(), string_to_sign.encode(), hashlib.sha256).hexdigest()
+print("▶ signature   :", sig)
 
-# 4) 헤더 세팅
-headers = {
-    "Authorization": f"CEA {ACCESS}:{sig}",
-    "X-Timestamp": ts,
-}
+# 4) full-format Authorization header
+auth = (
+    f"CEA algorithm=HmacSHA256, "
+    f"access-key={ACCESS}, "
+    f"signed-date={ts}, "
+    f"signature={sig}"
+)
+print("▶ Authorization:", auth)
 
-# 5) 호출
-resp = requests.get(url, headers=headers)
+resp = requests.get(url, headers={
+    "Authorization": auth,
+    "Content-Type" : "application/json;charset=UTF-8"
+})
 print("▶ HTTP STATUS :", resp.status_code)
 print("▶ RESPONSE    :", resp.text)
