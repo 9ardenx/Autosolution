@@ -70,4 +70,3 @@ async def fetch_orders() -> list:
 
     return results
 
-
