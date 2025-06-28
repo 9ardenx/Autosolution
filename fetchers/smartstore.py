@@ -1,41 +1,56 @@
-import os, time, hmac, hashlib, aiohttp, json
+from datetime import datetime
+import os, json, time
+import hashlib, hmac, aiohttp
 
-BASE = "https://api.commerce.naver.com/external/v2"
-AK, SK, CID = os.getenv("NAVER_ACCESS_KEY"), os.getenv("NAVER_SECRET_KEY"), os.getenv("NAVER_CUSTOMER_ID")
+ACCESS = os.getenv("NAVER_ACCESS_KEY")
+SECRET = os.getenv("NAVER_SECRET_KEY")
+CID    = os.getenv("NAVER_CUSTOMER_ID")
+BASE   = "https://api.commerce.naver.com"
 
-def _sig(ts, m, p, q="", b=""):
-    msg = f"{ts}.{m}.{p}.{q}.{b}"
-    return hmac.new(SK.encode(), msg.encode(), hashlib.sha256).hexdigest()
+def _sig(method, path, ts, body=""):
+    msg = f"{ts}.{method}.{path}.{body}"
+    return hmac.new(SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
-def _hdr(m, p, q="", body=None):
-    ts = str(int(time.time()*1000))
+def _hdr(method, path, body=""):
+    ts = str(int(time.time() * 1000))
+    signature = _sig(method, path, ts, json.dumps(body, separators=(",",":")) if body else "")
     return {
-        "X-Timestamp": ts,
-        "X-API-KEY": AK,
-        "X-Customer-Id": CID,
-        "X-Signature": _sig(ts, m, p, q, json.dumps(body, separators=(",",":")) if body else ""),
+        "X-API-KEY":      ACCESS,
+        "X-Customer-Id":  CID,
+        "X-Timestamp":    ts,
+        "X-Signature":    signature,
+        "Content-Type":   "application/json"
     }
 
 async def fetch_orders():
-    """
-    '변경 상품 주문 내역 조회' 엔드포인트 예시
-    결제완료·상품준비중 건만 가져오고, 필요한 필드만 변환
-    """
-    async with aiohttp.ClientSession() as s:
-        p = "/change-product-orders"
-        q = "lastChangedFrom=2024-01-01T00:00:00&lastChangedTo=2099-12-31T23:59:59&status=ON_PAYMENT"
-        async with s.get(f"{BASE}{p}?{q}", headers=_hdr("GET", p, q)) as r:
-            r.raise_for_status()
-            data = await r.json()
+    # 날짜 포맷 맞춰서
+    from_date = "2024-01-01T00:00:00"
+    to_date   = "2099-12-31T23:59:59"
+
+    # v1 한 방 조회
+    path = "/external/v1/pay-order/seller/product-orders/query"
+    body = {
+        "createdAtFrom": from_date,
+        "createdAtTo":   to_date,
+        "status":        ["ON_PAYMENT"]
+    }
+    url = f"{BASE}{path}"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=body, headers=_hdr("POST", path, body)) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+
     orders = []
-    for o in data["productOrderList"]:
+    for dto in data.get("productOrderDtos", []):
         orders.append({
-            "name": o["receiverName"],
-            "contact": o["receiverContact1"],
-            "address": f'{o["shippingAddress"]["base"]} {o["shippingAddress"]["detail"]}',
-            "product": o["productName"],
-            "box_count": o["orderQuantity"],
-            "msg": o.get("etcMessage", ""),
-            "platform_order_id": o["productOrderId"],
+            "name":        dto["receiverName"],
+            "contact":     dto["receiverPhone"],
+            "address":     f"{dto['receiverAddr']}".strip(),
+            "product":     dto["productName"],
+            "box_count":   dto["orderCount"],
+            "msg":         dto.get("memo", ""),
+            "order_id":    dto["orderId"],
         })
     return orders
+
