@@ -1,16 +1,16 @@
-"""
-CSV 링크를 '나에게 보내기'로 전송.
-사전 준비: KAKAO_ACCESS_TOKEN, KAKAO_REST_KEY를 GitHub Secrets에 등록.
-"""
+# notifier/kakao.py
 
-import os, requests, json
+import os, requests
 
-def send_file_link(url: str, text: str = "재고/송장 CSV 파일입니다"):
+def send_file_link(url: str):
+    """
+    CSV 파일 URL을 '나에게 보내기'로 스크랩 카드 전송
+    - KAKAO_ACCESS_TOKEN: 사용자 액세스 토큰(카카오 로그인 → talk_message 권한 필요)
+    """
     token = os.getenv("KAKAO_ACCESS_TOKEN")
     if not token:
         raise RuntimeError("KAKAO_ACCESS_TOKEN 환경변수 없음")
 
-    # Scrap API로 링크 카드 전송
     res = requests.post(
         "https://kapi.kakao.com/v2/api/talk/memo/scrap/send",
         headers={"Authorization": f"Bearer {token}"},
