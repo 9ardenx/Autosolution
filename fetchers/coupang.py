@@ -28,11 +28,11 @@ def _hdr(method: str, path: str, query: str = "") -> dict:
         "Content-Type": "application/json;charset=UTF-8"
     }
 
-async def fetch_orders(days: int = 7) -> list:
-    """최근 days(기본 7일) 주문을 조회. 주문 없으면 403 무시."""
-    # 최근 7일 범위로 조회
+async def fetch_orders(days: int = 4) -> list:
+    """최근 days(기본 4일: 금~월) 주문을 조회. 주문 없으면 403 무시."""
+    # 최근 4일 범위로 조회 (UTC 기준)
     now = datetime.utcnow()
-    start = (now - timedelta(days=days)).strftime('%Y-%m-%dT00:00:00')
+    start = (now - timedelta(days=3)).strftime('%Y-%m-%dT00:00:00')
     end   = now.strftime('%Y-%m-%dT23:59:59')
 
     path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
@@ -75,4 +75,3 @@ async def fetch_orders(days: int = 7) -> list:
         })
 
     return results
-
