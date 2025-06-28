@@ -1,6 +1,6 @@
 import itertools, asyncio
-from orders.smartstore_orders import fetch_orders as ss_fetch
-from orders.coupang_orders import fetch_orders as cp_fetch
+from fetchers.smartstore import fetch_orders as ss_fetch
+from fetchers.coupang import fetch_orders as cp_fetch
 from invoices.builder import build_invoices
 from exporter.csv_exporter import save_csv
 from notifier.kakao import send_file_link     # TODO: 링크 함수 완성
