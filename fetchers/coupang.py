@@ -52,16 +52,33 @@ async def fetch_orders():
             r.raise_for_status()
             data = await r.json()
 
-    # 응답 데이터 파싱 (v4 형식)
+    # 응답 데이터 파싱 (수정된 필드명 사용)
     return [
         {
             "name"     : o["receiver"]["name"],
-            "contact"  : o["receiver"]["receiverPhone"], 
-            "address"  : f"{o['receiver']['baseAddress']} {o['receiver']['detailAddress']}".strip(),
-            "product"  : o["productName"],
-            "box_count": o["shippingCount"],
-            "msg"      : o.get("deliveryMemo", ""),
+            "contact"  : o["receiver"]["receiverNumber"],  # ✅ 올바른 필드명으로 수정
+            "address"  : f"{o['receiver']['addr1']} {o['receiver']['addr2']}".strip(),  # ✅ addr1, addr2로 수정
+            "product"  : o["orderItems"][0]["vendorItemName"] if o["orderItems"] else "",  # ✅ orderItems 배열에서 가져오기
+            "box_count": o["orderItems"][0]["shippingCount"] if o["orderItems"] else 0,   # ✅ orderItems에서 가져오기
+            "msg"      : o.get("parcelPrintMessage", ""),  # ✅ 배송메시지 필드명 수정
             "order_id" : str(o["orderId"]),
         }
         for o in data.get("data", [])  # v4는 data 배열 사용
+    ]
+
+async def fetch_orders():
+    # ... (앞부분 동일)
+    
+    # 더 안전한 파싱 로직
+    return [
+        {
+            "name"     : o.get("receiver", {}).get("name", ""),
+            "contact"  : o.get("receiver", {}).get("receiverNumber") or o.get("receiver", {}).get("safeNumber", ""),  # 실번호가 없으면 안심번호 사용
+            "address"  : f"{o.get('receiver', {}).get('addr1', '')} {o.get('receiver', {}).get('addr2', '')}".strip(),
+            "product"  : o.get("orderItems", [{}])[0].get("vendorItemName", "") if o.get("orderItems") else "",
+            "box_count": o.get("orderItems", [{}])[0].get("shippingCount", 0) if o.get("orderItems") else 0,
+            "msg"      : o.get("parcelPrintMessage", ""),
+            "order_id" : str(o.get("orderId", "")),
+        }
+        for o in data.get("data", [])
     ]
