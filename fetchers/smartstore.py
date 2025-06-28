@@ -13,8 +13,8 @@ CLIENT_SECRET = os.getenv("NAVER_SECRET_KEY")
 CUSTOMER_ID   = os.getenv("NAVER_CUSTOMER_ID")
 
 # 엔드포인트
-TOKEN_URL      = "https://api.commerce.naver.com/external/v1/oauth2/token"
-ORDER_LIST_URL = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders"
+TOKEN_URL               = "https://api.commerce.naver.com/external/v1/oauth2/token"
+LAST_CHANGED_URL        = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/last-changed-statuses"
 
 async def _fetch_token() -> str:
     """OAuth2 Client Credentials Grant + 전자서명으로 토큰 발급"""
@@ -50,34 +50,31 @@ async def _get_token() -> str:
     return _fetch_token._token
 
 async def fetch_orders(
-    created_from: str = None,
-    status:        list = None,
-    page_size:     int  = 100,
-    page:          int  = 1
+    last_changed_from: str = None,
+    last_changed_type: str = "PAYED",
+    limit_count:      int = 100,
+    more_sequence:    str = None
 ) -> list:
     """
-    조건형 상품 주문 상세 내역 조회 (GET)
-    - created_from: ISO 8601 "YYYY-MM-DDTHH:MM:SS.sss±TZ" (생략 시 24시간 전 KST)
-    - status: ["PAYED", ...] 등 문서에 명시된 코드 사용
+    '변경 상품 주문 내역 조회' (last-changed-statuses)
+    - last_changed_from: ISO8601 with ms +TZ (e.g. "2025-06-27T21:00:00.000+09:00"), defaults to 24h ago
+    - last_changed_type: one of PAY_WAITING,PAYED,DELIVERING,DELIVERED, etc.
+    - limit_count: up to 300
+    - more_sequence: for paging
     """
-    # 1) KST 기준 24시간 전부터 현재까지
     KST = timezone(timedelta(hours=9))
     now_kst = datetime.now(KST)
-    if created_from is None:
-        created_from = (now_kst - timedelta(days=1)).isoformat(timespec="milliseconds")
-    if status is None:
-        status = ["PAYED"]
+    if last_changed_from is None:
+        last_changed_from = (now_kst - timedelta(days=1)).isoformat(timespec="milliseconds")
 
-    # 2) 파라미터 설정 (to 생략하면 from부터 24시간 범위)
     params = {
-        "from":                  created_from,
-        "rangeType":             "PAYED_DATETIME",
-        "productOrderStatuses":  ",".join(status),
-        "pageSize":              page_size,
-        "page":                  page
+        "lastChangedFrom": last_changed_from,
+        "lastChangedType": last_changed_type,
+        "limitCount":      limit_count
     }
+    if more_sequence:
+        params["moreSequence"] = more_sequence
 
-    # 3) 헤더에 Bearer 토큰과 고객 ID 포함
     token = await _get_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -85,25 +82,27 @@ async def fetch_orders(
         "X-Customer-Id": CUSTOMER_ID
     }
 
-    # 4) API 호출
     async with aiohttp.ClientSession() as sess:
-        async with sess.get(ORDER_LIST_URL, params=params, headers=headers) as resp:
+        async with sess.get(LAST_CHANGED_URL, params=params, headers=headers) as resp:
             resp.raise_for_status()
-            data = await resp.json()
+            resp_json = await resp.json()
 
-    # 5) 각 주문을빌더가 기대하는 평탄화된 형태로 리턴
+    # Drill into the array
+    raw = resp_json.get("data", {})
+    orders_list = raw.get("lastChangeStatuses", [])
     results = []
-    for o in data.get("data", []):
-        # flatten productOrderDtos → take first item
-        item = (o.get("productOrderDtos") or [{}])[0]
+    for o in orders_list:
+        # Flatten each productOrder change into your invoice fields
+        # The Naver response keys may differ; adjust as needed.
         results.append({
             "name":      o.get("receiverName", ""),
-            "contact":   o.get("receiverPhone", ""),
+            "contact":   o.get("receiverContactTelephone", ""),
             "address":   f"{o.get('receiverBaseAddress','')} {o.get('receiverDetailAddress','')}".strip(),
-            "product":   item.get("vendorItemName", ""),
-            "box_count": item.get("orderCount", 1),
-            "msg":        item.get("parcelPrintMessage", o.get("orderMemo", "")),
+            "product":   o.get("productName", "") or o.get("productOrderId", ""),
+            "box_count": 1,  # no per-item count in this endpoint
+            "msg":        o.get("orderMemo", ""),
             "order_id":  str(o.get("orderId", ""))
         })
 
     return results
+
