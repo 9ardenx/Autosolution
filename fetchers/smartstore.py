@@ -17,7 +17,6 @@ TOKEN_URL      = "https://api.commerce.naver.com/external/v1/oauth2/token"
 ORDER_LIST_URL = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders"
 
 async def _fetch_token() -> str:
-    """OAuth2 Client Credentials Grant + 전자서명으로 토큰 발급"""
     ts = str(int((time.time() - 3) * 1000))
     raw = f"{CLIENT_ID}_{ts}".encode()
     signed = bcrypt.hashpw(raw, CLIENT_SECRET.encode())
@@ -44,7 +43,6 @@ async def _fetch_token() -> str:
     return token
 
 async def _get_token() -> str:
-    """캐시된 토큰 재사용, 없거나 만료 임박 시 재발급"""
     if not getattr(_fetch_token, "_token", None) or time.time() >= getattr(_fetch_token, "_expires_at", 0):
         return await _fetch_token()
     return _fetch_token._token
@@ -89,21 +87,25 @@ async def fetch_orders(
     async with aiohttp.ClientSession() as sess:
         async with sess.get(ORDER_LIST_URL, params=params, headers=headers) as resp:
             resp.raise_for_status()
-            data = await resp.json()
+            response_json = await resp.json()
 
-    # 5) 각 주문을 빌더가 기대하는 평탄화된 형태로 리턴
+    # 5) 'productOrderDtos' 키의 리스트를 꺼내서 평탄화
+    orders = response_json.get("data", {}).get("productOrderDtos", [])
+
     results = []
-    for o in data.get("data", []):
-        # productOrderDtos 배열 중 첫 번째 옵션명 사용
-        item = (o.get("productOrderDtos") or [{}])[0]
+    for o in orders:
+        # 각 주문의 첫 번째 상품 옵션만 사용
+        item = (o.get("productOrderDtos") or [{}])[0] if False else o  # Placeholder, see below
+        # Actually here, o itself is a productOrderDto containing fields:
         results.append({
             "name":      o.get("receiverName", ""),
             "contact":   o.get("receiverContactTelephone", ""),
             "address":   f"{o.get('receiverBaseAddress','')} {o.get('receiverDetailAddress','')}".strip(),
-            "product":   item.get("vendorItemName", ""),
-            "box_count": item.get("orderCount", 1),
-            "msg":        item.get("parcelPrintMessage", o.get("orderMemo", "")),
+            "product":   o.get("vendorItemName", ""),     # 단일 문자열
+            "box_count": o.get("orderCount", 1),
+            "msg":        o.get("parcelPrintMessage", o.get("orderMemo", "")),
             "order_id":  str(o.get("orderId", ""))
         })
 
     return results
+
