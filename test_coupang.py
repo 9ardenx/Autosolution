@@ -9,43 +9,34 @@ BASE   = "https://api-gateway.coupang.com"
 method = "GET"
 path   = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
 
-# 필수 날짜 파라미터 추가
+# 일 단위 조회 - yyyy-MM-dd 형식 사용
 today = datetime.now()
-created_at_from = today.strftime('%Y-%m-%dT00:00')
-created_at_to = today.strftime('%Y-%m-%dT23:59')
+created_at_from = today.strftime('%Y-%m-%d')  # 2025-06-28
+created_at_to = today.strftime('%Y-%m-%d')    # 2025-06-28
 
-# 수정된 쿼리 파라미터 (필수 파라미터 포함)
+# 수정된 쿼리 파라미터 (yyyy-MM-dd 형식)
 query = f"createdAtFrom={created_at_from}&createdAtTo={created_at_to}&status=INSTRUCT&maxPerPage=1"
 url = f"{BASE}{path}?{query}"
 
-# signed-date 생성
+# 서명 생성 (나머지 코드 동일)
 ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
-
-# StringToSign 생성
 sts = f"{ts}{method}{path}{query}"
-print("▶ StringToSign:", repr(sts))
-
-# 서명 생성
 sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
-print("▶ Signature   :", sig)
 
-# Authorization 헤더
 auth = (
     f"CEA algorithm=HmacSHA256, "
     f"access-key={ACCESS}, "
     f"signed-date={ts}, "
     f"signature={sig}"
 )
-print("▶ Authorization:", auth)
 
-# 헤더 설정 (X-Requested-By 필수)
 headers = {
     "Authorization": auth,
     "X-Requested-By": VENDOR,
     "Content-Type": "application/json;charset=UTF-8"
 }
 
-# API 호출
 resp = requests.get(url, headers=headers)
 print("▶ HTTP STATUS :", resp.status_code)
 print("▶ RESPONSE    :", resp.text)
+
