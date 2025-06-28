@@ -31,7 +31,6 @@ def _hdr(method: str, path: str, query: str = "") -> dict:
 
 async def fetch_orders() -> list:
     """v4 API를 사용한 주문 조회 및 평탄화"""
-    # 오늘 하루(UTC) 조회
     today = datetime.utcnow().strftime('%Y-%m-%d')
     path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
     query = f"createdAtFrom={today}&createdAtTo={today}&status=ACCEPT&maxPerPage=50"
@@ -39,15 +38,23 @@ async def fetch_orders() -> list:
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, headers=_hdr("GET", path, query)) as resp:
+            # 디버그 로그
+            text = await resp.text()
+            print(f"[Coupang] request URL: {url}")
+            print(f"[Coupang] status: {resp.status}")
+            print(f"[Coupang] body: {text}")
             resp.raise_for_status()
             resp_json = await resp.json()
 
+    # 실제 데이터 구조에 맞춰 리스트 추출
+    raw_data = resp_json.get("data", {})
+    orders = raw_data.get("orderSheetDisplayResponses", []) if isinstance(raw_data, dict) else raw_data
+
     results = []
-    for o in resp_json.get("data", []):
+    for o in orders:
         receiver = o.get("receiver", {})
         items = o.get("orderItems", [])
 
-        # 첫 번째 상품만 문자열로 처리
         if items:
             first = items[0]
             product_name = first.get("vendorItemName", "")
@@ -62,7 +69,7 @@ async def fetch_orders() -> list:
             "name":      receiver.get("name", ""),
             "contact":   receiver.get("receiverNumber", ""),
             "address":   f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
-            "product":   product_name,     # 항상 문자열
+            "product":   product_name,
             "box_count": box_count,
             "msg":        msg,
             "order_id":  str(o.get("orderId", ""))
