@@ -1,13 +1,12 @@
-# fetchers/coupang.py
 async def fetch_orders():
-    # --- 디버그: 실제 egress IP 찍기 ---
+    # ─── egress IP 찍기 ───────────────────
     async with aiohttp.ClientSession() as sess:
         async with sess.get("https://ifconfig.me/ip") as r:
             real_ip = (await r.text()).strip()
             print("▶ Real Egress IP:", real_ip)
-    # ------------------------------------
+    # ────────────────────────────────────────
 
-    # --- 기존 주문 조회 로직 시작 ---
+    # 기존 주문 조회 로직…
     async with aiohttp.ClientSession() as sess:
         path  = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR_ID}/ordersheets"
         query = "?status=ACCEPT&page=1&maxPerPage=50"
@@ -15,7 +14,7 @@ async def fetch_orders():
         async with sess.get(url, headers=_hdr("GET", path)) as r:
             r.raise_for_status()
             data = await r.json()
-    # …이어서 나머지 처리
+    # …
 
 import os, time, hmac, base64, hashlib, json, aiohttp
 
