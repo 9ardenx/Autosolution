@@ -32,9 +32,8 @@ async def run():
     csv_path = save_csv(invoices)
     print("CSV saved to", csv_path)
 
-    # 4) 전송
-    await send_file_link(csv_path)
+    # 4) 전송 (동기 함수 호출)
+    send_file_link(csv_path)
 
 if __name__ == "__main__":
     asyncio.run(run())
-
