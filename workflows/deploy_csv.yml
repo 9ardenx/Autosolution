@@ -1,4 +1,4 @@
-name: Deploy CSV to GitHub Pages
+name: Deploy CSV to GitHub PagesAdd commentMore actions
 
 on:
   push:
@@ -26,14 +26,20 @@ jobs:
       - name: Generate CSV
         run: python main.py
 
-      - name: Copy CSV to public
+      - name: Copy CSV to docs
         run: |
-          mkdir -p public/exports
-          cp exports/*.csv public/exports/
+          mkdir -p docs/exports
+          cp exports/*.csv docs/exports/
+
+      - name: Commit CSV to docs
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add docs/exports/*.csv
+          git commit -m "Deploy CSV $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes"
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./public
-
+          publish_dir: ./docs
