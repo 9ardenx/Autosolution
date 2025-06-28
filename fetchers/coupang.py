@@ -1,9 +1,11 @@
+# fetchers/coupang.py
+
 import os
 import time
 import hmac
 import hashlib
 import aiohttp
-from datetime import datetime, timedelta
+from datetime import datetime
 
 ACCESS = os.getenv("COUPANG_ACCESS_KEY")
 SECRET = os.getenv("COUPANG_SECRET_KEY")
@@ -11,6 +13,7 @@ VENDOR = os.getenv("COUPANG_VENDOR_ID")
 BASE   = "https://api-gateway.coupang.com"
 
 def _hdr(method: str, path: str, query: str = "") -> dict:
+    """v4 API용 CEA 인증 헤더 생성"""
     ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
     sts = f"{ts}{method}{path}{query}"
     sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
@@ -26,22 +29,25 @@ def _hdr(method: str, path: str, query: str = "") -> dict:
         "Content-Type": "application/json;charset=UTF-8"
     }
 
-async def fetch_orders_per_day(start, end, page=1, max_per_page=50):
-    path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
-    query = f"createdAtFrom={start}&createdAtTo={end}&status=ACCEPT&maxPerPage={max_per_page}&page={page}"
-    url = f"{BASE}{path}?{query}"
-    print(f"[Coupang] request URL: {url}")
+async def fetch_orders() -> list:
+    """v4 API를 사용한 주문 조회 및 평탄화"""
+    # 오늘 하루(UTC) 조회
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    path  = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
+    query = f"createdAtFrom={today}&createdAtTo={today}&status=ACCEPT&maxPerPage=50"
+    url   = f"{BASE}{path}?{query}"
+
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, headers=_hdr("GET", path, query)) as resp:
-            if resp.status == 403:
-                print("[Coupang] 403 Forbidden: 인증 실패 or 주문 없음 or 권한 문제 → 빈 리스트 반환")
-                return []
             resp.raise_for_status()
             resp_json = await resp.json()
+
     results = []
     for o in resp_json.get("data", []):
         receiver = o.get("receiver", {})
         items    = o.get("orderItems", [])
+
+        # 첫 번째 상품만 문자열로 처리
         if items:
             first = items[0]
             product_name = first.get("vendorItemName", "")
@@ -51,34 +57,15 @@ async def fetch_orders_per_day(start, end, page=1, max_per_page=50):
             product_name = ""
             box_count    = 0
             msg          = o.get("parcelPrintMessage", "")
+
         results.append({
             "name":      receiver.get("name", ""),
             "contact":   receiver.get("receiverNumber", ""),
             "address":   f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
             "product":   product_name,
             "box_count": box_count,
-            "msg":       msg,
+            "msg":        msg,
             "order_id":  str(o.get("orderId", ""))
         })
+
     return results
-
-async def fetch_orders(days: int = 4) -> list:
-    """최근 days(4)일 결제완료 주문 모두 긁어오기 (페이지 전부)"""
-    all_results = []
-    now = datetime.utcnow()
-    for i in range(days):
-        day_from = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
-        day_to   = day_from.replace(hour=23, minute=59, second=59, microsecond=999999)
-        start = day_from.strftime('%Y-%m-%dT00:00:00')
-        end   = day_to.strftime('%Y-%m-%dT23:59:59')
-        page = 1
-        while True:
-            batch = await fetch_orders_per_day(start, end, page=page)
-            if not batch:
-                break
-            all_results.extend(batch)
-            if len(batch) < 50:
-                break
-            page += 1
-    return all_results
-
