@@ -1,4 +1,5 @@
 # test_coupang.py
+
 import os, time, hmac, hashlib, requests
 
 ACCESS = os.getenv("COUPANG_ACCESS_KEY")
@@ -14,15 +15,15 @@ url    = f"{BASE}{path}?{query}"
 # 1) signed-date (UTC, yyMMddTHHmmssZ)
 ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
 
-# 2) stringToSign = signed-date + method + path + query
-string_to_sign = f"{ts}{method}{path}{query}"
-print("▶ stringToSign:", string_to_sign)
+# 2) StringToSign = signed-date + method + path + query
+sts = f"{ts}{method}{path}{query}"
+print("▶ StringToSign:", repr(sts))
 
 # 3) signature = HEX(HMAC-SHA256)
-sig = hmac.new(SECRET.encode(), string_to_sign.encode(), hashlib.sha256).hexdigest()
-print("▶ signature   :", sig)
+sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
+print("▶ Signature   :", sig)
 
-# 4) full-format Authorization header
+# 4) Authorization header (full format)
 auth = (
     f"CEA algorithm=HmacSHA256, "
     f"access-key={ACCESS}, "
@@ -31,9 +32,15 @@ auth = (
 )
 print("▶ Authorization:", auth)
 
-resp = requests.get(url, headers={
+# 5) 반드시 X-Requested-By header 추가!
+headers = {
     "Authorization": auth,
-    "Content-Type" : "application/json;charset=UTF-8"
-})
+    "X-Requested-By": VENDOR,
+    "Content-Type": "application/json;charset=UTF-8"
+}
+
+# 6) 호출
+resp = requests.get(url, headers=headers)
 print("▶ HTTP STATUS :", resp.status_code)
 print("▶ RESPONSE    :", resp.text)
+
