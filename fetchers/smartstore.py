@@ -57,7 +57,7 @@ async def fetch_orders(
 ) -> list:
     """
     조건형 상품 주문 상세 내역 조회 (GET)
-    - created_from: ISO 8601 "YYYY-MM-DDTHH:MM:SS.sss±TZ" 형식 (생략 시 24시간 전)
+    - created_from: ISO 8601 "YYYY-MM-DDTHH:MM:SS.sss±TZ" 형식 (생략 시 24시간 전 KST)
     - status: ["PAYED", "DELIVERING", ...] (문서에 명시된 코드 사용)
     """
     # 1) KST 기준 24시간 전부터 현재까지
@@ -66,7 +66,7 @@ async def fetch_orders(
     if created_from is None:
         created_from = (now_kst - timedelta(days=1)).isoformat(timespec="milliseconds")
     if status is None:
-        status = ["PAYED"]  # 결제 완료
+        status = ["PAYED"]
 
     # 2) aiohttp params 사용해 자동 인코딩 처리
     params = {
@@ -93,3 +93,4 @@ async def fetch_orders(
 
     # 5) data 배열 반환
     return data.get("data", [])
+
