@@ -4,7 +4,6 @@ import os
 import time
 import hmac
 import hashlib
-import json
 import aiohttp
 from datetime import datetime
 
@@ -32,47 +31,43 @@ def _hdr(method: str, path: str, query: str = "") -> dict:
 
 async def fetch_orders() -> list:
     """v4 API를 사용한 주문 조회 및 평탄화"""
-    # 엔드포인트 설정 (yyyy-MM-dd 형식으로 오늘 하루 조회)
-    today = datetime.now().strftime('%Y-%m-%d')
+    # 오늘 하루(UTC) 조회
+    today = datetime.utcnow().strftime('%Y-%m-%d')
     path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
     query = f"createdAtFrom={today}&createdAtTo={today}&status=ACCEPT&maxPerPage=50"
     url = f"{BASE}{path}?{query}"
 
-    # API 호출
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, headers=_hdr("GET", path, query)) as resp:
             resp.raise_for_status()
             resp_json = await resp.json()
 
-    # 'data' 배열에서 각 orderSheetDto 평탄화
     results = []
     for o in resp_json.get("data", []):
-        # 기본 주문 정보
         receiver = o.get("receiver", {})
         items = o.get("orderItems", [])
-        # 아이템이 없으면 하나의 기본 레코드 생성
-        if not items:
-            results.append({
-                "name":     receiver.get("name", ""),
-                "contact":  receiver.get("receiverNumber", ""),
-                "address":  f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
-                "product":  "", 
-                "box_count": 0,
-                "msg":      o.get("parcelPrintMessage", ""),
-                "order_id": str(o.get("orderId", ""))
-            })
+
+        # 최소 하나의 상품 항목 처리: 첫 번째 아이템만 사용
+        if items:
+            item = items[0]
+            product_name = item.get("vendorItemName", "")
+            box_count    = item.get("shippingCount", 0)
+            msg          = item.get("parcelPrintMessage", o.get("parcelPrintMessage", ""))
         else:
-            # 각 상품별로 레코드 생성
-            for item in items:
-                results.append({
-                    "name":     receiver.get("name", ""),
-                    "contact":  receiver.get("receiverNumber", ""),
-                    "address":  f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
-                    "product":  item.get("vendorItemName", ""),
-                    "box_count": item.get("shippingCount", 0),
-                    "msg":      item.get("parcelPrintMessage", o.get("parcelPrintMessage", "")),
-                    "order_id": str(o.get("orderId", ""))
-                })
+            product_name = ""
+            box_count    = 0
+            msg          = o.get("parcelPrintMessage", "")
+
+        results.append({
+            "name":      receiver.get("name", ""),
+            "contact":   receiver.get("receiverNumber", ""),
+            "address":   f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
+            "product":   product_name,     # 문자열
+            "box_count": box_count,        # 숫자
+            "msg":        msg,             # 문자열
+            "order_id":  str(o.get("orderId", ""))
+        })
 
     return results
+
 
