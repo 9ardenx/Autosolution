@@ -1,41 +1,42 @@
-import os, time, hmac, hashlib, aiohttp, json
+import os, time, hmac, base64, hashlib, json, aiohttp
+ACCESS, SECRET, VENDOR_ID = os.getenv("COUPANG_ACCESS_KEY"), os.getenv("COUPANG_SECRET_KEY"), os.getenv("COUPANG_VENDOR_ID")
+BASE = "https://api-gateway.coupang.com"
 
-BASE = "https://api.commerce.naver.com/external/v2"
-AK, SK, CID = os.getenv("NAVER_ACCESS_KEY"), os.getenv("NAVER_SECRET_KEY"), os.getenv("NAVER_CUSTOMER_ID")
+def _sig(path, method, ts):
+    msg = f"{method} {path}\n{ts}\n{ACCESS}"
+    return base64.b64encode(hmac.new(SECRET.encode(), msg.encode(), hashlib.sha256).digest()).decode()
 
-def _sig(ts, m, p, q="", b=""):
-    msg = f"{ts}.{m}.{p}.{q}.{b}"
-    return hmac.new(SK.encode(), msg.encode(), hashlib.sha256).hexdigest()
-
-def _hdr(m, p, q="", body=None):
+def _hdr(method, path):
     ts = str(int(time.time()*1000))
     return {
+        "Authorization": f"CEA {ACCESS}:{_sig(path, method, ts)}",
+        "Content-Type": "application/json",
         "X-Timestamp": ts,
-        "X-API-KEY": AK,
-        "X-Customer-Id": CID,
-        "X-Signature": _sig(ts, m, p, q, json.dumps(body, separators=(",",":")) if body else ""),
     }
 
 async def fetch_orders():
     """
-    '변경 상품 주문 내역 조회' 엔드포인트 예시
-    결제완료·상품준비중 건만 가져오고, 필요한 필드만 변환
+    ACCEPT 상태(=결제완료) 주문만 가져옴.
+    ※ 쿠팡은 고객 정보 암호화 필드가 많아 decrypt API 쿼리 필요할 수 있음.
     """
-    async with aiohttp.ClientSession() as s:
-        p = "/change-product-orders"
-        q = "lastChangedFrom=2024-01-01T00:00:00&lastChangedTo=2099-12-31T23:59:59&status=ON_PAYMENT"
-        async with s.get(f"{BASE}{p}?{q}", headers=_hdr("GET", p, q)) as r:
+    async with aiohttp.ClientSession() as sess:
+        path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR_ID}/ordersheets"
+        query = "?status=ACCEPT&page=1&maxPerPage=50"
+        url = f"{BASE}{path}{query}"
+        async with sess.get(url, headers=_hdr("GET", path)) as r:
             r.raise_for_status()
             data = await r.json()
+
     orders = []
-    for o in data["productOrderList"]:
+    for o in data["orderSheetDtos"]:
+        ship = o["shippingAddress"]
         orders.append({
-            "name": o["receiverName"],
-            "contact": o["receiverContact1"],
-            "address": f'{o["shippingAddress"]["base"]} {o["shippingAddress"]["detail"]}',
+            "name"  : ship["name"],
+            "contact": ship["receiverPhone"],
+            "address": f'{ship["baseAddress"]} {ship["detailAddress"]}'.strip(),
             "product": o["productName"],
-            "box_count": o["orderQuantity"],
-            "msg": o.get("etcMessage", ""),
-            "platform_order_id": o["productOrderId"],
+            "box_count": o["shippingCount"],         # 수량
+            "msg"   : o.get("deliveryMemo", ""),
+            "platform_order_id": str(o["orderId"]),
         })
     return orders
