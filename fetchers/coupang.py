@@ -10,6 +10,24 @@ ACCESS = os.getenv("COUPANG_ACCESS_KEY")
 SECRET = os.getenv("COUPANG_SECRET_KEY")
 VENDOR = os.getenv("COUPANG_VENDOR_ID")
 BASE   = "https://api-gateway.coupang.com"
+
+def _hdr(method: str, path: str, query: str = "") -> dict:
+    """v4 API용 CEA 인증 헤더 생성"""
+    ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
+    sts = f"{ts}{method}{path}{query}"
+    sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
+    auth = (
+        f"CEA algorithm=HmacSHA256, "
+        f"access-key={ACCESS}, "
+        f"signed-date={ts}, "
+        f"signature={sig}"
+    )
+    return {
+        "Authorization": auth,
+        "X-Requested-By": VENDOR,
+        "Content-Type": "application/json;charset=UTF-8"
+    }
+
 async def fetch_orders() -> list:
     """최근 7일치 결제완료(ACCEPT) 주문 조회 및 평탄화"""
     now = datetime.utcnow()
