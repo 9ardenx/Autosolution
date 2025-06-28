@@ -7,33 +7,29 @@ SECRET    = os.getenv("COUPANG_SECRET_KEY")
 VENDOR_ID = os.getenv("COUPANG_VENDOR_ID")
 BASE_URL  = "https://api-gateway.coupang.com"
 
-def _sig(path: str, method: str, ts: str) -> str:
-    """
-    stringToSign = "{method} {path}\\n{timestamp}\\n{accessKey}"
-    signature    = Base64( HMAC-SHA256( secretKey, stringToSign ) )
-    """
-    # ➊ signature 대상 문자열
-    string_to_sign = f"{method} {path}\n{ts}\n{ACCESS}"
-    # —디버그용 프린트 (Postman 'Generate signature' 결과와 비교)
-    print("▶ Coupang StringToSign:", repr(string_to_sign))
+import time, hmac, base64, hashlib
 
-    # ➋ HMAC-SHA256 → Base64
+ACCESS    = os.getenv("COUPANG_ACCESS_KEY")
+SECRET    = os.getenv("COUPANG_SECRET_KEY")
+VENDOR_ID = os.getenv("COUPANG_VENDOR_ID")
+
+def _sig(path: str, method: str, ts: str) -> str:
+    string_to_sign = f"{method} {path}\n{ts}\n{ACCESS}"
+    # 디버그 출력 (원하는 경우만)
+    print("▶ StringToSign:", repr(string_to_sign))
     signature = base64.b64encode(
         hmac.new(SECRET.encode(), string_to_sign.encode(), hashlib.sha256).digest()
     ).decode()
-    print("▶ Coupang Signature   :", signature)
+    print("▶ Signature   :", signature)
     return signature
 
 def _hdr(method: str, path: str) -> dict:
-    """
-    path 에는 반드시 '/v2/providers/.../ordersheets' 형태로,
-    쿼리스트링 없이 전달해야 합니다.
-    """
     ts = str(int(time.time() * 1000))
+    sig = _sig(path, method, ts)
     return {
-        "Authorization": f"CEA {ACCESS}:{_sig(path, method, ts)}",
-        "X-Timestamp": ts,
-        "Content-Type": "application/json",
+        "Authorization": f"CEA {ACCESS}:{sig}",
+        "X-Timestamp"  : ts,
+        "Content-Type" : "application/json",
     }
 
 async def fetch_orders() -> list[dict]:
