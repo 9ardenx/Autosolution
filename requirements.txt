@@ -3,3 +3,5 @@ pandas
 python-dotenv
 requests
 boto3
+bcrypt
+pybase64
