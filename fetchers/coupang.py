@@ -1,48 +1,67 @@
 # fetchers/coupang.py
 
 import os, time, hmac, hashlib, json, aiohttp
+from datetime import datetime
 
 ACCESS = os.getenv("COUPANG_ACCESS_KEY")
-SECRET = os.getenv("COUPANG_SECRET_KEY")
+SECRET = os.getenv("COUPANG_SECRET_KEY") 
 VENDOR = os.getenv("COUPANG_VENDOR_ID")
 BASE   = "https://api-gateway.coupang.com"
 
-def _hdr(method: str, path: str, body="") -> dict:
-    ts = str(int(time.time() * 1000))
-    msg = f"{method} {path}\n{ts}\n{ACCESS}\n{body}"
-    sig = hmac.new(SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+def _hdr(method: str, path: str, query: str = "") -> dict:
+    """v4 API용 CEA 인증 헤더 생성"""
+    # signed-date 형식: yyMMddTHHmmssZ (GMT 기준)
+    ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
+    
+    # StringToSign = signed-date + method + path + query
+    sts = f"{ts}{method}{path}{query}"
+    
+    # HMAC-SHA256 서명 생성
+    sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
+    
+    # CEA 인증 헤더
+    auth = (
+        f"CEA algorithm=HmacSHA256, "
+        f"access-key={ACCESS}, "
+        f"signed-date={ts}, "
+        f"signature={sig}"
+    )
+    
     return {
-        "Authorization": f"CEA {ACCESS}:{sig}",
-        "X-Timestamp"  : ts,
-        "Content-Type" : "application/json; charset=utf-8"
+        "Authorization": auth,
+        "X-Requested-By": VENDOR,  # v4에서는 필수
+        "Content-Type": "application/json;charset=UTF-8"
     }
 
 async def fetch_orders():
-    # 결제완료(ON_PAYMENT) 상태만 조회
-    path = f"/v2/providers/openapi/apis/api/v1/vendors/{VENDOR}/ordersheets"
-    # v1의 경우 쿼리 매개변수를 Body JSON으로 전달할 수도 있습니다:
-    body = {
-        "status": "ACCEPT",
-        "page": 1,
-        "maxPerPage": 50
-    }
-    url = f"{BASE}{path}"
+    """v4 API를 사용한 주문 조회"""
+    # v4 API 엔드포인트
+    path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
+    
+    # 오늘 날짜로 쿼리 파라미터 설정 (yyyy-MM-dd 형식)
+    today = datetime.now()
+    created_at_from = today.strftime('%Y-%m-%d')
+    created_at_to = today.strftime('%Y-%m-%d')
+    
+    # 쿼리 파라미터
+    query = f"createdAtFrom={created_at_from}&createdAtTo={created_at_to}&status=ACCEPT&maxPerPage=50"
+    url = f"{BASE}{path}?{query}"
 
     async with aiohttp.ClientSession() as sess:
-        async with sess.post(url, json=body, headers=_hdr("POST", path, json.dumps(body, separators=(',',':')))) as r:
+        async with sess.get(url, headers=_hdr("GET", path, query)) as r:
             r.raise_for_status()
             data = await r.json()
 
-    # 파싱 로직
+    # 응답 데이터 파싱 (v4 형식)
     return [
         {
-            "name"     : o["shippingAddress"]["name"],
-            "contact"  : o["shippingAddress"]["receiverPhone"],
-            "address"  : f"{o['shippingAddress']['baseAddress']} {o['shippingAddress']['detailAddress']}".strip(),
+            "name"     : o["receiver"]["name"],
+            "contact"  : o["receiver"]["receiverPhone"], 
+            "address"  : f"{o['receiver']['baseAddress']} {o['receiver']['detailAddress']}".strip(),
             "product"  : o["productName"],
             "box_count": o["shippingCount"],
-            "msg"      : o.get("deliveryMemo",""),
+            "msg"      : o.get("deliveryMemo", ""),
             "order_id" : str(o["orderId"]),
         }
-        for o in data.get("orderSheetDtos", [])
+        for o in data.get("data", [])  # v4는 data 배열 사용
     ]
