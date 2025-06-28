@@ -1,7 +1,10 @@
 import itertools, asyncio
-from fetchers.smartstore import fetch_orders as ss_fetch
-from fetchers.coupang import fetch_orders as cp_fetch
+from fetchers.smartstore import smartstore_client
 from invoices.builder import build_invoices
+ ss, cp = await asyncio.gather(
+        smartstore_client.fetch_orders(), 
+        cp_fetch()
+    )
 from exporter.csv_exporter import save_csv
 from notifier.kakao import send_file_link     # TODO: 링크 함수 완성
 from dotenv import load_dotenv
