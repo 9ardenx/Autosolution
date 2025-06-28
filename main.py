@@ -26,13 +26,16 @@ async def run():
         ss_orders = ss_data
 
     print("SmartStore orders count:", len(ss_orders))
-    print("Coupang orders count:", len(cp_orders))
+    print("Coupang orders count:",   len(cp_orders))
 
     # 주문 리스트 합치기
     combined_orders = list(itertools.chain(ss_orders, cp_orders))
 
+    # 방어막: 딕셔너리가 아닌 항목은 제거
+    clean_orders = [o for o in combined_orders if isinstance(o, dict)]
+
     # 인보이스 생성 및 CSV 저장
-    invoices = build_invoices(combined_orders)
+    invoices = build_invoices(clean_orders)
     csv_path = save_csv(invoices)
     print(f"CSV saved to {csv_path}")
 
