@@ -1,8 +1,8 @@
 import os
 import time
 import aiohttp
-import bcrypt            # pip install bcrypt
-import pybase64          # pip install pybase64
+import bcrypt
+import pybase64
 from datetime import datetime, timedelta, timezone
 
 CLIENT_ID     = os.getenv("NAVER_ACCESS_KEY")
@@ -17,7 +17,6 @@ async def _fetch_token() -> str:
     raw = f"{CLIENT_ID}_{ts}".encode()
     signed = bcrypt.hashpw(raw, CLIENT_SECRET.encode())
     sign_b64 = pybase64.standard_b64encode(signed).decode()
-
     data = {
         "client_id":          CLIENT_ID,
         "timestamp":          ts,
@@ -26,12 +25,10 @@ async def _fetch_token() -> str:
         "type":               "SELF"
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
     async with aiohttp.ClientSession() as sess:
         async with sess.post(TOKEN_URL, data=data, headers=headers) as resp:
             resp.raise_for_status()
             js = await resp.json()
-
     token      = js["access_token"]
     expires    = js.get("expires_in", 10800)
     _fetch_token._token      = token
@@ -43,37 +40,25 @@ async def _get_token() -> str:
         return await _fetch_token()
     return _fetch_token._token
 
-async def fetch_orders(days: int = 4) -> list:
-    """
-    최근 n일간 결제완료(PAYED) 주문만 불러오기
-    """
-    KST = timezone(timedelta(hours=9))
-    now_kst = datetime.now(KST)
-    created_from = (now_kst - timedelta(days=days)).isoformat(timespec="milliseconds")
-
-    params = {
-        "from":                  created_from,
-        "rangeType":             "PAYED_DATETIME",
-        "productOrderStatuses":  "PAYED",
-        "pageSize":              100,
-        "page":                  1
-    }
-
+async def fetch_orders_per_day(created_from, created_to, status=["PAYED"], page=1, page_size=100):
     token = await _get_token()
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type":  "application/json",
         "X-Customer-Id": CUSTOMER_ID
     }
-
+    params = {
+        "from":                  created_from,
+        "to":                    created_to,
+        "rangeType":             "PAYED_DATETIME",
+        "productOrderStatuses":  ",".join(status),
+        "pageSize":              page_size,
+        "page":                  page
+    }
     async with aiohttp.ClientSession() as sess:
         async with sess.get(ORDER_LIST_URL, params=params, headers=headers) as resp:
-            if resp.status == 403:
-                print("[SmartStore] 403 Forbidden: 인증 실패(키/시크릿/고객ID 확인) or 권한 부족")
-                return []
             resp.raise_for_status()
             response_json = await resp.json()
-
     orders = response_json.get("data", {}).get("productOrderDtos", [])
     results = []
     for o in orders:
@@ -83,8 +68,30 @@ async def fetch_orders(days: int = 4) -> list:
             "address":   f"{o.get('receiverBaseAddress','')} {o.get('receiverDetailAddress','')}".strip(),
             "product":   o.get("vendorItemName", ""),
             "box_count": o.get("orderCount", 1),
-            "msg":       o.get("parcelPrintMessage", o.get("orderMemo", "")),
+            "msg":        o.get("parcelPrintMessage", o.get("orderMemo", "")),
             "order_id":  str(o.get("orderId", ""))
         })
-
     return results
+
+async def fetch_orders(days: int = 4) -> list:
+    """
+    최근 days일(4일)간 모든 'PAYED' 주문 긁어오기 (페이지 전부)
+    """
+    all_results = []
+    KST = timezone(timedelta(hours=9))
+    now = datetime.now(KST)
+    for i in range(days):
+        day_from = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_to   = day_from + timedelta(days=1)
+        created_from = day_from.isoformat(timespec="milliseconds")
+        created_to   = day_to.isoformat(timespec="milliseconds")
+        page = 1
+        while True:
+            batch = await fetch_orders_per_day(created_from, created_to, page=page)
+            if not batch:
+                break
+            all_results.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+    return all_results
