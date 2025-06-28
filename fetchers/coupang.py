@@ -1,4 +1,13 @@
 # fetchers/coupang.py
+async def fetch_orders():
+    # --- 디버그: 실제 egress IP 찍기 ---
+    async with aiohttp.ClientSession() as sess:
+        async with sess.get("https://ifconfig.me/ip") as r:
+            real_ip = (await r.text()).strip()
+            print("▶ Real Egress IP:", real_ip)
+    # ------------------------------------
+    async with aiohttp.ClientSession() as sess:
+        # 이후 원래 로직...
 
 import os, time, hmac, base64, hashlib, json, aiohttp
 
