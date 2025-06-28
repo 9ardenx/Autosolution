@@ -1,101 +1,57 @@
 # fetchers/smartstore.py
 
-import os
-import time
-import json
-import aiohttp
-import asyncio
-from datetime import datetime, timedelta
-import bcrypt                # pip install bcrypt
-import pybase64             # pip install pybase64
+import os, aiohttp, asyncio
+from datetime import datetime, timedelta, timezone
 
-# 환경변수에서 읽어오기
-CLIENT_ID     = os.getenv("NAVER_ACCESS_KEY")
+CLIENT_ID   = os.getenv("NAVER_ACCESS_KEY")
 CLIENT_SECRET = os.getenv("NAVER_SECRET_KEY")
-CUSTOMER_ID   = os.getenv("NAVER_CUSTOMER_ID")
-TOKEN_URL     = "https://api.commerce.naver.com/external/v1/oauth2/token"
+CUSTOMER_ID = os.getenv("NAVER_CUSTOMER_ID")
 ORDER_LIST_URL = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders"
 
-class SmartStoreClient:
-    def __init__(self):
-        self.client_id     = CLIENT_ID
-        self.client_secret = CLIENT_SECRET
-        self.customer_id   = CUSTOMER_ID
-        self._token        = None
-        self._expires_at   = 0  # UNIX timestamp
+async def fetch_orders(
+    created_from: str = None,
+    status:         list = None,
+    page_size:      int = 100,
+    page:           int = 1
+) -> list:
+    """
+    조건형 상품 주문 상세 내역 조회 (GET)
+    - 조회 기준 시작 일시(created_from): ISO 8601 "YYYY-MM-DDTHH:MM:SS.sss±TZ" 형식 필수
+    - to 파라미터 생략 시 from부터 24시간 내역 자동 조회
+    - status 예: ["ON_PAYMENT"], ["IN_DELIVERY"], ["DELIVERED"]
+    """
+    # 1) 기본 생성: 24시간 전부터 지금까지
+    now = datetime.now(timezone.utc).astimezone()
+    if created_from is None:
+        created_from = (now - timedelta(days=1)).isoformat(timespec="milliseconds")
+    if status is None:
+        status = ["ON_PAYMENT"]
 
-    async def _fetch_token(self) -> str:
-        """토큰 발급/갱신 (Client Credentials Grant + 전자서명)"""
-        timestamp = str(int((time.time() - 3) * 1000))
-        raw = f"{self.client_id}_{timestamp}".encode("utf-8")
-        signed = bcrypt.hashpw(raw, self.client_secret.encode("utf-8"))
-        client_secret_sign = pybase64.standard_b64encode(signed).decode()
+    # 2) 쿼리 파라미터
+    params = {
+        "from":                 created_from,
+        "rangeType":            "PAYED_DATETIME",
+        "productOrderStatuses": ",".join(status),
+        "pageSize":             page_size,
+        "page":                 page
+    }
+    # (참고) to 포함하려면 아래처럼 추가하되, created_from 대비 24시간 미만인지 확인 필요
+    # params["to"] = now.isoformat(timespec="milliseconds")
 
-        data = {
-            "client_id":          self.client_id,
-            "timestamp":          timestamp,
-            "client_secret_sign": client_secret_sign,
-            "grant_type":         "client_credentials",
-            "type":               "SELF"
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    # 3) 토큰 발급 로직은 기존 get_token()/ _fetch_token() 활용
+    token = await smartstore_client.get_token()
 
-        async with aiohttp.ClientSession() as sess:
-            async with sess.post(TOKEN_URL, data=data, headers=headers) as resp:
-                resp.raise_for_status()
-                js = await resp.json()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type":  "application/json",
+        "X-Customer-Id": CUSTOMER_ID
+    }
 
-        token      = js["access_token"]
-        expires_in = js.get("expires_in", 10800)
-        self._token      = token
-        self._expires_at = time.time() + expires_in - 60
-        return token
+    # 4) API 호출
+    async with aiohttp.ClientSession() as sess:
+        async with sess.get(ORDER_LIST_URL, params=params, headers=headers) as resp:
+            resp.raise_for_status()  # 400 Bad Request → 예외 발생
+            data = await resp.json()
 
-    async def get_token(self) -> str:
-        """유효한 토큰 반환 (필요 시 갱신)"""
-        if not self._token or time.time() >= self._expires_at:
-            return await self._fetch_token()
-        return self._token
+    return data.get("data", [])
 
-    async def fetch_orders(self,
-                           created_from: str = None,
-                           created_to:   str = None,
-                           status:       list = None,
-                           page_size:    int = 100,
-                           page:         int = 1) -> list:
-        """
-        조건형 상품 주문 상세 내역 조회 (GET)
-        - created_from/to: ISO 8601 "YYYY-MM-DDTHH:MM:SS" 형식
-        - status: ["ON_PAYMENT", ...]
-        """
-        if created_from is None:
-            created_from = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
-        if created_to is None:
-            created_to = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        if status is None:
-            status = ["ON_PAYMENT"]
-
-        params = {
-            "from":                 created_from,
-            "to":                   created_to,
-            "rangeType":            "PAYED_DATETIME",
-            "productOrderStatuses": ",".join(status),
-            "pageSize":             page_size,
-            "page":                 page
-        }
-        headers = {
-            "Authorization": f"Bearer {await self.get_token()}",
-            "Content-Type":  "application/json",
-            "X-Customer-Id":  self.customer_id
-        }
-
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(ORDER_LIST_URL, params=params, headers=headers) as resp:
-                resp.raise_for_status()
-                result = await resp.json()
-
-        return result.get("data", [])
-
-
-smartstore_client = SmartStoreClient()
-fetch_orders = smartstore_client.fetch_orders
