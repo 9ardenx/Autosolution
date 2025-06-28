@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 from dotenv import load_dotenv
 
 from fetchers.smartstore import smartstore_client
