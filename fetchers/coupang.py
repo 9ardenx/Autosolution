@@ -1,41 +1,18 @@
-# fetchers/coupang.py
-
-import os
-import time
-import hmac
-import hashlib
-import aiohttp
-from datetime import datetime
-
-ACCESS = os.getenv("COUPANG_ACCESS_KEY")
-SECRET = os.getenv("COUPANG_SECRET_KEY")
-VENDOR = os.getenv("COUPANG_VENDOR_ID")
-BASE   = "https://api-gateway.coupang.com"
-
-def _hdr(method: str, path: str, query: str = "") -> dict:
-    """v4 API용 CEA 인증 헤더 생성"""
-    ts = time.strftime('%y%m%dT%H%M%SZ', time.gmtime())
-    sts = f"{ts}{method}{path}{query}"
-    sig = hmac.new(SECRET.encode(), sts.encode(), hashlib.sha256).hexdigest()
-    auth = (
-        f"CEA algorithm=HmacSHA256, "
-        f"access-key={ACCESS}, "
-        f"signed-date={ts}, "
-        f"signature={sig}"
-    )
-    return {
-        "Authorization": auth,
-        "X-Requested-By": VENDOR,
-        "Content-Type": "application/json;charset=UTF-8"
-    }
+from datetime import datetime, timedelta
 
 async def fetch_orders() -> list:
-    """v4 API를 사용한 주문 조회 및 평탄화"""
-    # 오늘 하루(UTC) 조회
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    path  = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
-    query = f"createdAtFrom={today}&createdAtTo={today}&status=ACCEPT&maxPerPage=50"
-    url   = f"{BASE}{path}?{query}"
+    """최근 7일치 결제완료(ACCEPT) 주문 조회 및 평탄화"""
+    now = datetime.utcnow()
+    seven_days_ago = now - timedelta(days=7)
+    start = seven_days_ago.strftime('%Y-%m-%dT00:00:00')
+    end   = now.strftime('%Y-%m-%dT23:59:59')
+
+    path = f"/v2/providers/openapi/apis/api/v4/vendors/{VENDOR}/ordersheets"
+    query = (
+        f"createdAtFrom={start}&createdAtTo={end}"
+        f"&status=ACCEPT&maxPerPage=50"
+    )
+    url = f"{BASE}{path}?{query}"
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, headers=_hdr("GET", path, query)) as resp:
@@ -46,8 +23,6 @@ async def fetch_orders() -> list:
     for o in resp_json.get("data", []):
         receiver = o.get("receiver", {})
         items    = o.get("orderItems", [])
-
-        # 첫 번째 상품만 문자열로 처리
         if items:
             first = items[0]
             product_name = first.get("vendorItemName", "")
@@ -64,9 +39,8 @@ async def fetch_orders() -> list:
             "address":   f"{receiver.get('addr1','')} {receiver.get('addr2','')}".strip(),
             "product":   product_name,
             "box_count": box_count,
-            "msg":        msg,
+            "msg":       msg,
             "order_id":  str(o.get("orderId", ""))
         })
 
     return results
-
