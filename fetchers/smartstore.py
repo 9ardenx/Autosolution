@@ -3,8 +3,8 @@
 import os
 import time
 import aiohttp
-import bcrypt            # pip install bcrypt
-import pybase64          # pip install pybase64
+import bcrypt  # pip install bcrypt
+import pybase64  # pip install pybase64
 from datetime import datetime, timedelta, timezone
 
 # 환경변수
@@ -13,8 +13,8 @@ CLIENT_SECRET = os.getenv("NAVER_SECRET_KEY")
 CUSTOMER_ID   = os.getenv("NAVER_CUSTOMER_ID")
 
 # 엔드포인트
-TOKEN_URL               = "https://api.commerce.naver.com/external/v1/oauth2/token"
-LAST_CHANGED_URL        = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/last-changed-statuses"
+TOKEN_URL        = "https://api.commerce.naver.com/external/v1/oauth2/token"
+LAST_CHANGED_URL = "https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/last-changed-statuses"
 
 async def _fetch_token() -> str:
     """OAuth2 Client Credentials Grant + 전자서명으로 토큰 발급"""
@@ -84,22 +84,24 @@ async def fetch_orders(
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(LAST_CHANGED_URL, params=params, headers=headers) as resp:
+            # 디버그 로그
+            text = await resp.text()
+            print(f"[SmartStore] request params: {params}")
+            print(f"[SmartStore] status: {resp.status}")
+            print(f"[SmartStore] body: {text}")
             resp.raise_for_status()
             resp_json = await resp.json()
 
-    # Drill into the array
     raw = resp_json.get("data", {})
     orders_list = raw.get("lastChangeStatuses", [])
     results = []
     for o in orders_list:
-        # Flatten each productOrder change into your invoice fields
-        # The Naver response keys may differ; adjust as needed.
         results.append({
             "name":      o.get("receiverName", ""),
             "contact":   o.get("receiverContactTelephone", ""),
             "address":   f"{o.get('receiverBaseAddress','')} {o.get('receiverDetailAddress','')}".strip(),
             "product":   o.get("productName", "") or o.get("productOrderId", ""),
-            "box_count": 1,  # no per-item count in this endpoint
+            "box_count": 1,
             "msg":        o.get("orderMemo", ""),
             "order_id":  str(o.get("orderId", ""))
         })
