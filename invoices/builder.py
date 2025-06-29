@@ -60,6 +60,3 @@ def build_invoices(order: dict) -> list[dict]:
 
     return invoices
 
-
-    return invoices
-
